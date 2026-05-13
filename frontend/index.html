@@ -1040,55 +1040,14 @@
   <div style="margin-top:8px;">Powered by Claude AI · Yelp · Amazon Reviews · Goodreads</div>
 </footer>
 
-<!-- API KEY MODAL -->
-<div class="modal-overlay" id="apiKeyModal">
-  <div class="modal-box">
-    <div class="modal-logo">Mirror<span>Mind</span></div>
-    <p class="modal-subtitle">Enter your Anthropic API key to power the AI engine.<br/>Your key stays in your browser session only — never stored on any server.</p>
-    <label class="modal-label">Anthropic API Key</label>
-    <input class="modal-input" id="apiKeyInput" type="password" placeholder="sk-ant-api03-..." />
-    <div class="modal-error" id="apiKeyError">⚠️ Key must start with <code>sk-ant-</code></div>
-    <button class="modal-btn" id="apiKeySubmit">Connect to MirrorMind →</button>
-    <p class="modal-note">
-      Don't have a key? Get one free at
-      <a href="https://console.anthropic.com/settings/keys" target="_blank">console.anthropic.com</a>
-    </p>
-  </div>
-</div>
-
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
 
 <script>
-  // ── API Configuration ──────────────────────────────────────────────────────
-  // On Vercel: calls Anthropic directly from browser (enter key in the modal below)
-  // Local dev with backend: set USE_BACKEND = true and run docker-compose
-  const USE_BACKEND = false;
-  const API_BASE = 'http://localhost:8000';
+  // ── API Configuration ─────────────────────────────────────────────────────
+  const GROQ_API_KEY = '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';
+  const GROQ_MODEL   = 'llama-3.3-70b-versatile';
 
-  // Get stored API key
-  function getApiKey() {
-    return sessionStorage.getItem('mm_api_key') || '';
-  }
-
-  // Show API key modal if needed
-  function ensureApiKey() {
-    return new Promise((resolve) => {
-      if (getApiKey()) return resolve(true);
-      const modal = document.getElementById('apiKeyModal');
-      modal.style.display = 'flex';
-      document.getElementById('apiKeySubmit').onclick = () => {
-        const val = document.getElementById('apiKeyInput').value.trim();
-        if (!val.startsWith('sk-ant-')) {
-          document.getElementById('apiKeyError').style.display = 'block';
-          return;
-        }
-        sessionStorage.setItem('mm_api_key', val);
-        modal.style.display = 'none';
-        resolve(true);
-      };
-    });
-  }
 
   let currentTab = 'review';
 
@@ -1178,9 +1137,6 @@
   }
 
   async function runAgent() {
-    const ready = await ensureApiKey();
-    if (!ready) return;
-
     const btn = document.getElementById('runBtn');
     btn.disabled = true;
     document.getElementById('btnText').textContent = 'Thinking...';
@@ -1298,12 +1254,12 @@ PRODUCT TO REVIEW: "${product.name}" (${product.category}, ${product.domain})
 
 Analyze the user's rating patterns, voice, and preferences. Then generate what this user would write.
 
-Return ONLY this JSON (no markdown):
+Return ONLY this JSON, no other text, no markdown, no explanation:
 {
-  "predicted_rating": <1.0-5.0>,
-  "generated_review": "<authentic review in user's voice>",
-  "confidence": <0.0-1.0>,
-  "reasoning": "<2 sentences explaining your prediction logic>"
+  "predicted_rating": <number between 1.0 and 5.0>,
+  "generated_review": "<review text here>",
+  "confidence": <number between 0.0 and 1.0>,
+  "reasoning": "<one sentence explaining the rating>"
 }`;
   }
 
@@ -1325,51 +1281,75 @@ DOMAIN: ${domainNote}
 For Nigerian users, prioritise items available or relevant in Nigeria where possible.
 Reason about the user's taste profile before recommending.
 
-Return ONLY this JSON (no markdown):
+Return ONLY this JSON, no other text, no markdown, no explanation:
 {
-  "reasoning_summary": "<2 sentences about this user's taste>",
-  "strategy_used": "<e.g. content-based on genre, cross-domain transfer>",
-  "domain_coverage": ["yelp", "goodreads"],
+  "reasoning_summary": "<one sentence about this user>",
+  "strategy_used": "<strategy name>",
+  "domain_coverage": ["yelp"],
   "recommendations": [
     {
       "rank": 1,
-      "name": "<real item name>",
-      "domain": "<yelp|amazon|goodreads|other>",
+      "name": "<item name>",
+      "domain": "<yelp or amazon or goodreads or other>",
       "category": "<category>",
-      "predicted_rating": <4.0-5.0>,
-      "reason": "<personalised reason for THIS user>"
+      "predicted_rating": 4.5,
+      "reason": "<why this suits this user>"
     }
   ]
 }`;
   }
 
   async function callClaudeInPage(prompt) {
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": getApiKey(),
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
+        "Authorization": `Bearer ${GROQ_API_KEY}`
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: GROQ_MODEL,
+        temperature: 0.7,
         max_tokens: 1000,
-        messages: [{ role: "user", content: prompt }]
+        messages: [
+          {
+            role: "system",
+            content: "You are MirrorMind, a precise user behaviour simulation engine. You ALWAYS respond with valid JSON exactly as instructed. Never add commentary outside the JSON."
+          },
+          { role: "user", content: prompt }
+        ]
       })
     });
+
     if (!response.ok) {
       const err = await response.json();
-      if (err?.error?.type === 'authentication_error') {
-        sessionStorage.removeItem('mm_api_key');
-        throw new Error('Invalid API key. Please re-enter.');
-      }
-      throw new Error(err?.error?.message || 'API error');
+      throw new Error(err?.error?.message || 'Groq API error');
     }
+
     const data = await response.json();
-    const text = data.content.map(c => c.text || '').join('');
-    const clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-    return JSON.parse(clean);
+    const text = data.choices?.[0]?.message?.content || '';
+    
+    // Robust JSON extraction
+    let clean = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    
+    // Try direct parse first
+    try { return JSON.parse(clean); } catch(e) {}
+    
+    // Try extracting just the JSON object
+    const objMatch = clean.match(/\{[\s\S]*\}/);
+    if (objMatch) { try { return JSON.parse(objMatch[0]); } catch(e) {} }
+    
+    // Fix common issues: trailing commas, unescaped quotes
+    const fixed = clean
+      .replace(/,\s*}/g, '}')
+      .replace(/,\s*]/g, ']')
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2018\u2019]/g, "'");
+    try { return JSON.parse(fixed); } catch(e) {}
+    
+    const fixedObj = fixed.match(/\{[\s\S]*\}/);
+    if (fixedObj) { try { return JSON.parse(fixedObj[0]); } catch(e) {} }
+    
+    throw new Error('Could not parse AI response. Please try again.');
   }
 
   function renderReview(data) {
