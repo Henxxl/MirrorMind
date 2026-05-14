@@ -1,7 +1,7 @@
 {
-  "outputDirectory": ".",
+  "outputDirectory": "frontend",
   "builds": [
-    { "src": "index.html", "use": "@vercel/static" }
+    { "src": "frontend/index.html", "use": "@vercel/static" }
   ],
   "routes": [
     { "src": "/(.*)", "dest": "/index.html" }
